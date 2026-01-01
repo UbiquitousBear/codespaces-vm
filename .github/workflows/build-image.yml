@@ -46,6 +46,20 @@ jobs:
           sudo mv linuxkit /usr/local/bin/linuxkit
           echo "linuxkit version: $(linuxkit version || true)"
 
+          # Configure Docker credentials for GHCR so linuxkit can pull private images
+          mkdir -p ~/.docker
+          cat > ~/.docker/config.json <<'DOCKERCFG'
+          {
+            "auths": {
+              "ghcr.io": {
+                "username": "${{ github.actor }}",
+                "password": "${{ secrets.GITHUB_TOKEN }}",
+                "auth": "$(echo -n '${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}' | base64)"
+              }
+            }
+          }
+          DOCKERCFG
+
           echo "Running linuxkit build (kernel+initrd)..."
           linuxkit build --format kernel+initrd linux.yml
 
