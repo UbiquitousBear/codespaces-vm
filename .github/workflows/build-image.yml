@@ -50,7 +50,8 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
           echo "Running linuxkit build (kernel+initrd)..."
-          linuxkit build --format kernel+initrd linux.yml
+          # Pass GHCR credentials directly to linuxkit via --registry-creds flag
+          linuxkit build --format kernel+initrd --registry-creds "https://ghcr.io=${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" linux.yml
 
           # Locate produced kernel/initrd files
           KERNEL_FILE=$(ls -1 kernel* 2>/dev/null | head -n1 || true)
