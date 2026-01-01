@@ -48,17 +48,16 @@ jobs:
 
           # Configure Docker credentials for GHCR so linuxkit can pull private images
           mkdir -p ~/.docker
-          cat > ~/.docker/config.json <<'DOCKERCFG'
+          AUTH_TOKEN=$(echo -n "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" | base64 -w 0)
+          cat > ~/.docker/config.json <<EOF
           {
             "auths": {
               "ghcr.io": {
-                "username": "${{ github.actor }}",
-                "password": "${{ secrets.GITHUB_TOKEN }}",
-                "auth": "$(echo -n '${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}' | base64)"
+                "auth": "$AUTH_TOKEN"
               }
             }
           }
-          DOCKERCFG
+          EOF
 
           echo "Running linuxkit build (kernel+initrd)..."
           linuxkit build --format kernel+initrd linux.yml
