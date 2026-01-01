@@ -1,0 +1,123 @@
+name: Build LinuxKit Images
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build LinuxKit manifest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Build with linuxkit
+        id: build_iso
+        run: |
+          set -euo pipefail
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "Docker not installed on runner. linuxkit requires Docker to build images; install Docker or use a self-hosted runner with Docker." >&2
+            exit 1
+          fi
+
+          mkdir -p lxk-build-output
+
+          # Download linuxkit v1.8.2 for linux-amd64
+          URL=https://github.com/linuxkit/linuxkit/releases/download/v1.8.2/linuxkit-linux-amd64
+          echo "Downloading linuxkit from $URL"
+          curl -fsSL "$URL" -o linuxkit
+          chmod +x linuxkit
+          sudo mv linuxkit /usr/local/bin/linuxkit
+          echo "linuxkit version: $(linuxkit version || true)"
+
+          echo "Running linuxkit build (kernel+initrd)..."
+          linuxkit build --format kernel+initrd linux.yml
+
+          # Locate produced kernel/initrd files
+          KERNEL_FILE=$(ls -1 kernel* 2>/dev/null | head -n1 || true)
+          INITRD_FILE=$(ls -1 initrd* 2>/dev/null | head -n1 || true)
+
+          if [ -z "$KERNEL_FILE" ] && [ -z "$INITRD_FILE" ]; then
+            # Try more general search
+            KERNEL_FILE=$(ls -1 *kernel* 2>/dev/null | head -n1 || true)
+            INITRD_FILE=$(ls -1 *initrd* 2>/dev/null | head -n1 || true)
+          fi
+
+          if [ -z "$KERNEL_FILE" ] || [ -z "$INITRD_FILE" ]; then
+            echo "Did not find both kernel and initrd files from linuxkit build"
+            echo "Found kernel: $KERNEL_FILE"
+            echo "Found initrd: $INITRD_FILE"
+            echo "Current directory listing:"
+            ls -la
+            exit 1
+          fi
+
+          KOUT=lxk-build-output/actions-runner-docker.generated.kernel
+          IOUT=lxk-build-output/actions-runner-docker.generated.initrd
+          mv "$KERNEL_FILE" "$KOUT"
+          mv "$INITRD_FILE" "$IOUT"
+          echo "kernel=$KOUT" >> $GITHUB_OUTPUT
+          echo "initrd=$IOUT" >> $GITHUB_OUTPUT
+          ls -la lxk-build-output
+
+      - name: Verify kernel/initrd exist
+        run: |
+          KERNEL=${{ steps.build_iso.outputs.kernel }}
+          INITRD=${{ steps.build_iso.outputs.initrd }}
+          ls -la "$KERNEL" || (echo "No kernel produced: $KERNEL" && exit 1)
+          ls -la "$INITRD" || (echo "No initrd produced: $INITRD" && exit 1)
+
+      - name: Smoke test kernel/initrd
+        run: |
+          KERNEL=${{ steps.build_iso.outputs.kernel }}
+          INITRD=${{ steps.build_iso.outputs.initrd }}
+          # Show basic info about the produced files for debugging
+          file "$KERNEL" || true
+          ls -lh "$KERNEL"
+          file "$INITRD" || true
+          ls -lh "$INITRD"
+
+      - name: Create Containerfile
+        run: |
+          KERNEL=${{ steps.build_iso.outputs.kernel }}
+          INITRD=${{ steps.build_iso.outputs.initrd }}
+          cat > Containerfile <<EOF
+          FROM scratch
+          COPY $KERNEL /disk/
+          COPY $INITRD /disk/
+          EOF
+
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}:latest" >> "$GITHUB_ENV"    
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Containerfile
+          push: true
+          tags: ${{ env.IMAGE_NAME }}      
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linuxkit-docker-${{ steps.read_version.outputs.version }}
+          path: |
+            ${{ steps.build_iso.outputs.kernel }}
+            ${{ steps.build_iso.outputs.initrd }}
