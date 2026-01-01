@@ -52,6 +52,12 @@ jobs:
           # Pre-pull the image to populate Docker's local cache before linuxkit build
           # This ensures linuxkit can find the image in local cache
           docker pull ghcr.io/ubiquitousbear/codespace:latest
+          
+          # Get the image digest and update linux.yml to use it instead of :latest tag
+          # This avoids Docker registry resolution issues with GHCR
+          IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/ubiquitousbear/codespace:latest | cut -d'@' -f2)
+          echo "Image digest: sha256:${IMAGE_DIGEST}"
+          sed -i "s|image: ghcr.io/ubiquitousbear/codespace:latest|image: ghcr.io/ubiquitousbear/codespace@sha256:${IMAGE_DIGEST}|g" linux.yml
 
           echo "Running linuxkit build (kernel+initrd)..."
           linuxkit build --format kernel+initrd linux.yml
